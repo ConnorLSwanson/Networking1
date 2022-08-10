@@ -9,12 +9,8 @@ ENetHost* client = nullptr;
 
 bool CreateServer()
 {
-    /* Bind the server to the default localhost.     */
-    /* A specific host address can be specified by   */
-    /* enet_address_set_host (& address, "x.x.x.x"); */
     address.host = ENET_HOST_ANY;
 
-    /* Bind the server to port 1234. */
     address.port = 1234;
     server = enet_host_create(&address /* the address to bind the server host to */,
         32      /* allow up to 32 clients and/or outgoing connections */,
@@ -36,7 +32,7 @@ bool CreateClient()
     return client != nullptr;
 }
 
-int main(int argc, char** argv)
+int InitializeENet()
 {
     if (enet_initialize() != 0)
     {
@@ -45,21 +41,104 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
     atexit(enet_deinitialize);
+}
 
-    
+int GetInput()
+{
     cout << "1. Create Server " << endl;
     cout << "2. Create Client " << endl;
     int userInput;
     cin >> userInput;
+    return userInput;
+}
+
+void PrintServerInitError()
+{
+    fprintf(stderr,
+        "An error occurred while trying to create an ENet server host.\n");
+    exit(EXIT_FAILURE);
+}
+
+void PrintClientConnected(ENetEvent* eve)
+{
+    cout << "A new client connected from " << eve->peer->address.host
+        << ":" << eve->peer->address.port << endl;
+    /* Store any relevant client information here. */
+    eve->peer->data = (void*)"Client information";
+}
+
+void SendWelcomeMessage(ENetEvent* eve)
+{
+    /* Create a reliable packet of size 7 containing "packet\0" */
+    ENetPacket* packet = enet_packet_create("Hello World!",
+        strlen("Hello World!") + 1,
+        ENET_PACKET_FLAG_RELIABLE);
+
+    // Packet can be broadcast to all clients, or sent to a specific client.
+    /* enet_host_broadcast (host, 0, packet);         */
+    enet_peer_send(eve->peer, 0, packet);
+
+    /* One could just use enet_host_service() instead. */
+    enet_host_flush(server);
+}
+
+int main(int argc, char** argv)
+{
+    InitializeENet();    
+    
+    int userInput = GetInput();
+    
     switch (userInput)
     {
     case 1: 
         if (!CreateServer())
         {
-            fprintf(stderr,
-                "An error occurred while trying to create an ENet server host.\n");
-            exit(EXIT_FAILURE);
+            PrintServerInitError();
         }
+
+        while (true)
+        {
+            ENetEvent event;
+            /* Wait up to 1000 milliseconds for an event. */
+            while (enet_host_service(server, &event, 1000) > 0)
+            {
+                switch (event.type)
+                {
+                case ENET_EVENT_TYPE_CONNECT:
+                    PrintClientConnected(&event);
+
+                    SendWelcomeMessage(&event);
+                    
+                    /* do
+                    *       wait for input
+                    *       store input in variable
+                    *       
+                    *       Create packet with variable, variable length, and reliable flag
+                    *       Send packet to connected peer
+                    * 
+                    *       Flush server?
+                    * while host input != "Disconnect
+                    */
+
+                    break;
+                case ENET_EVENT_TYPE_RECEIVE:
+                    cout << "A packet of length " << event.packet->dataLength << " was received." << endl;
+                    cout << "Packet contains: " << (char*)event.packet->data << endl;
+                    
+                    /* Clean up the packet now that we're done using it. */
+                    enet_packet_destroy(event.packet);
+
+                    break;
+
+                case ENET_EVENT_TYPE_DISCONNECT:
+                    printf("%s disconnected.\n", (char*)event.peer->data);
+                    /* Reset the peer's client information. */
+                    event.peer->data = NULL;
+                }
+            }
+        }
+        
+
         break;
     case 2: 
         if (!CreateClient())
@@ -68,6 +147,69 @@ int main(int argc, char** argv)
                 "An error occurred while trying to create an ENet client host.\n");
             exit(EXIT_FAILURE);
         }
+
+        ENetAddress address;
+        ENetEvent event;
+        ENetPeer* peer;
+        /* Connect to some.server.net:1234. */
+        enet_address_set_host(&address, "127.0.0.1");
+        address.port = 1234;
+        /* Initiate the connection, allocating the two channels 0 and 1. */
+        peer = enet_host_connect(client, &address, 2, 0);
+        if (peer == NULL)
+        {
+            fprintf(stderr,
+                "No available peers for initiating an ENet connection.\n");
+            exit(EXIT_FAILURE);
+        }
+        /* Wait up to 5 seconds for the connection attempt to succeed. */
+        if (enet_host_service(client, &event, 5000) > 0 &&
+            event.type == ENET_EVENT_TYPE_CONNECT)
+        {
+            cout << "Connection to 127.0.0.1:1234 succeeded." << endl;
+        }
+        else
+        {
+            /* Either the 5 seconds are up or a disconnect event was */
+            /* received. Reset the peer in the event the 5 seconds   */
+            /* had run out without any significant event.            */
+            enet_peer_reset(peer);
+            cout << "Connection to 127.0.0.1:1234 failed." << endl;
+        }
+
+        while (true)
+        {
+            ENetEvent event;
+            // Wait up to 1000 milliseconds for an event
+            while (enet_host_service(client, &event, 1000) > 0)
+            { 
+                switch (event.type)
+                {
+                case ENET_EVENT_TYPE_RECEIVE:
+                    cout << "A packet of length " << event.packet->dataLength
+                        << " containing " << (char*)event.packet->data << endl;
+
+                    // Clean up since we are done using it.
+                    enet_packet_destroy(event.packet);
+
+                    {
+                        /* Create a reliable packet of size 7 containing "packet\0" */
+                        // TODO: Add string and adjust length to equal size of string
+                        ENetPacket* packet = enet_packet_create("Sup Dawg",
+                            strlen("Sup Dawg") + 1,
+                            ENET_PACKET_FLAG_RELIABLE);
+
+                        /* enet_host_broadcast (client, 0, packet);         */
+                        enet_peer_send(event.peer, 0, packet);
+                        /* One could just use enet_host_service() instead. */
+                        enet_host_flush(client);
+                    }
+
+                    break;
+                }
+            }
+        }
+
         break;
     default:
         cout << "Bad input" << endl;
