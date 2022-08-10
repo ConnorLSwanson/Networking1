@@ -32,7 +32,7 @@ bool CreateClient()
     return client != nullptr;
 }
 
-int main(int argc, char** argv)
+int InitializeENet()
 {
     if (enet_initialize() != 0)
     {
@@ -41,19 +41,59 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
     atexit(enet_deinitialize);
-    
+}
+
+int GetInput()
+{
     cout << "1. Create Server " << endl;
     cout << "2. Create Client " << endl;
     int userInput;
     cin >> userInput;
+    return userInput;
+}
+
+void PrintServerInitError()
+{
+    fprintf(stderr,
+        "An error occurred while trying to create an ENet server host.\n");
+    exit(EXIT_FAILURE);
+}
+
+void PrintClientConnected(ENetEvent* eve)
+{
+    cout << "A new client connected from " << eve->peer->address.host
+        << ":" << eve->peer->address.port << endl;
+    /* Store any relevant client information here. */
+    eve->peer->data = (void*)"Client information";
+}
+
+void SendWelcomeMessage(ENetEvent* eve)
+{
+    /* Create a reliable packet of size 7 containing "packet\0" */
+    ENetPacket* packet = enet_packet_create("Hello World!",
+        strlen("Hello World!") + 1,
+        ENET_PACKET_FLAG_RELIABLE);
+
+    // Packet can be broadcast to all clients, or sent to a specific client.
+    /* enet_host_broadcast (host, 0, packet);         */
+    enet_peer_send(eve->peer, 0, packet);
+
+    /* One could just use enet_host_service() instead. */
+    enet_host_flush(server);
+}
+
+int main(int argc, char** argv)
+{
+    InitializeENet();    
+    
+    int userInput = GetInput();
+    
     switch (userInput)
     {
     case 1: 
         if (!CreateServer())
         {
-            fprintf(stderr,
-                "An error occurred while trying to create an ENet server host.\n");
-            exit(EXIT_FAILURE);
+            PrintServerInitError();
         }
 
         while (true)
@@ -65,24 +105,20 @@ int main(int argc, char** argv)
                 switch (event.type)
                 {
                 case ENET_EVENT_TYPE_CONNECT:
-                    printf("A new client connected from %x:%u.\n",
-                        event.peer->address.host,
-                        event.peer->address.port);
-                    /* Store any relevant client information here. */
-                    event.peer->data = (void*)"Client information";
+                    PrintClientConnected(&event);
 
-                    {
-                        /* Create a reliable packet of size 7 containing "packet\0" */
-                        ENetPacket* packet = enet_packet_create("Hello World!",
-                            strlen("packet") + 1,
-                            ENET_PACKET_FLAG_RELIABLE);
-
-                        /* enet_host_broadcast (host, 0, packet);         */
-                        enet_peer_send(event.peer, 0, packet);
-                        /* One could just use enet_host_service() instead. */
-                        enet_host_flush(server);
-                    }
-
+                    SendWelcomeMessage(&event);
+                    
+                    /* do
+                    *       wait for input
+                    *       store input in variable
+                    *       
+                    *       Create packet with variable, variable length, and reliable flag
+                    *       Send packet to connected peer
+                    * 
+                    *       Flush server?
+                    * while host input != "Disconnect
+                    */
 
                     break;
                 case ENET_EVENT_TYPE_RECEIVE:
@@ -158,8 +194,9 @@ int main(int argc, char** argv)
 
                     {
                         /* Create a reliable packet of size 7 containing "packet\0" */
+                        // TODO: Add string and adjust length to equal size of string
                         ENetPacket* packet = enet_packet_create("Sup Dawg",
-                            strlen("hi") + 1,
+                            strlen("Sup Dawg") + 1,
                             ENET_PACKET_FLAG_RELIABLE);
 
                         /* enet_host_broadcast (client, 0, packet);         */
