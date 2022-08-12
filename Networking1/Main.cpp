@@ -1,11 +1,14 @@
 #include <enet/enet.h>
 #include <iostream>
+#include <string>
 
 using namespace std;
 
 ENetAddress address;
 ENetHost* server = nullptr;
 ENetHost* client = nullptr;
+ENetPeer* pPeer = nullptr;
+bool isConnected = false;
 
 bool CreateServer()
 {
@@ -82,43 +85,71 @@ void SendWelcomeMessage(ENetEvent* eve)
     enet_host_flush(server);
 }
 
+void SendChatMessage(ENetPeer* peer, string userInput)
+{
+    ENetPacket* chatPacket = enet_packet_create(userInput.c_str(),
+        userInput.length() + 1,
+        ENET_PACKET_FLAG_RELIABLE);
+
+    enet_peer_send(peer, 0, chatPacket);
+
+    enet_host_flush(server);
+}
+
 int main(int argc, char** argv)
 {
     InitializeENet();    
     
     int userInput = GetInput();
+    string strInput;
     
     switch (userInput)
     {
-    case 1: 
+    case 1:     
         if (!CreateServer())
         {
             PrintServerInitError();
         }
 
-        while (true)
+        while (strInput != "Disconnect")
         {
             ENetEvent event;
+
+            if (isConnected)
+            {
+                cout << "Enter chat message: " << endl;
+                cin >> strInput;
+
+                SendChatMessage(pPeer, strInput);
+            }
+
             /* Wait up to 1000 milliseconds for an event. */
             while (enet_host_service(server, &event, 1000) > 0)
             {
+                
                 switch (event.type)
                 {
                 case ENET_EVENT_TYPE_CONNECT:
                     PrintClientConnected(&event);
 
                     SendWelcomeMessage(&event);
+                    pPeer = event.peer;
+                    isConnected = true;
+
+                    /*cout << "Enter chat message: " << endl;
+                    cin >> strInput;
+
+                    SendChatMessage(&event, strInput);*/
+
+                    /*do
+                    {                        
+                        cout << "Enter chat message: " << endl;
+                        cin >> userInput;
+
+                        SendChatMessage(&event, userInput);
+
+                    } while (userInput != "Disconnect");*/
                     
-                    /* do
-                    *       wait for input
-                    *       store input in variable
-                    *       
-                    *       Create packet with variable, variable length, and reliable flag
-                    *       Send packet to connected peer
-                    * 
-                    *       Flush server?
-                    * while host input != "Disconnect
-                    */
 
                     break;
                 case ENET_EVENT_TYPE_RECEIVE:
@@ -134,6 +165,10 @@ int main(int argc, char** argv)
                     printf("%s disconnected.\n", (char*)event.peer->data);
                     /* Reset the peer's client information. */
                     event.peer->data = NULL;
+                    isConnected = false;
+
+                    break;
+
                 }
             }
         }
